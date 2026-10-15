@@ -1486,7 +1486,8 @@
       "model_tier": null,
       "verified": true,
       "last_verified": "2026-10-08",
-      "added": "2026-07-31"
+      "added": "2026-07-31",
+      "data_policy": {"trains_on_prompts":true,"retention":null,"source":"https://poolside.ai/legal/eula","checked":"2026-10-15","note":"Terms of Use, section 4: Content (prompts, code, output) may be used for training unless you opt out (Training Opt-Out under User Settings). Even after opting out, Content given as Feedback or flagged for safety review may be used for training. The terms cover Poolside APIs and Platform."}
     },
     {
       "slug": "upstage",

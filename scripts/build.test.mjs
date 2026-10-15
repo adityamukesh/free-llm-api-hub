@@ -2147,9 +2147,9 @@ test('data_policy lot 5: at least 25 of 68, Deepgram trains by its terms with an
   for (const dp of [dg, rw]) { assert.equal(dp.checked, '2026-10-15'); assert.ok(dp.quote.length <= 400 && dp.note.length <= 300); }
 });
 
-test('data_policy lot 6: 26 of 68, AI21 says it does not train, with the conditions of its own sentence', () => {
+test('data_policy lot 6: at least 26 of 68, AI21 says it does not train, with the conditions of its own sentence', () => {
   const data = JSON.parse(readFileSync(DATA, 'utf8'));
-  assert.equal(data.providers.filter((p) => p.data_policy).length, 26, 'the count of covered providers');
+  assert.ok(data.providers.filter((p) => p.data_policy).length >= 26, 'lot 6 raised the covered providers to 26; later lots only add (the exact count is pinned by the latest lot test)');
   const dp = data.providers.find((p) => p.slug === 'ai21').data_policy;
   assert.equal(dp.trains_on_prompts, false); assert.equal(dp.plan_named, false); assert.equal(dp.checked, '2026-10-15');
   assert.equal(dp.source, 'https://www.ai21.com/terms-policies/privacy-policy/', 'the final address, not the one that redirects');
@@ -2158,6 +2158,22 @@ test('data_policy lot 6: 26 of 68, AI21 says it does not train, with the conditi
   assert.ok(dp.quote.length <= 400 && dp.note.length <= 300);
   const md = readFileSync(join(ROOT, 'collections/no-training.md'), 'utf8');
   assert.ok(md.split('\n').some((l) => l.startsWith('| **[AI21')), 'AI21 is in the no-training collection');
+});
+
+test('data_policy lot 7: 27 of 68, Poolside may train on your Content by its Terms of Use unless you opt out (#341)', () => {
+  const data = JSON.parse(readFileSync(DATA, 'utf8'));
+  assert.equal(data.providers.filter((p) => p.data_policy).length, 27, 'the count of covered providers');
+  const dp = data.providers.find((p) => p.slug === 'poolside').data_policy;
+  assert.equal(dp.trains_on_prompts, true, 'may train, even though you can opt out');
+  assert.equal(dp.retention, null, 'the terms state no retention period for Content');
+  assert.equal(dp.source, 'https://poolside.ai/legal/eula', 'the Terms of Use, which cover the APIs and Poolside Platform');
+  assert.equal(dp.checked, '2026-10-15');
+  assert.match(dp.note, /Training Opt-Out under User Settings/, 'the opt-out is in the note');
+  assert.match(dp.note, /Feedback or flagged for safety review/, 'the exceptions to the opt-out are in the note');
+  assert.ok(dp.note.length <= 300);
+  const md = readFileSync(join(ROOT, 'collections/no-training.md'), 'utf8');
+  assert.ok(!md.split('\n').some((l) => l.startsWith('| **[Poolside')), 'Poolside is not in the no-training collection');
+  assert.match(readFileSync(join(ROOT, 'site/data-policy/index.html'), 'utf8'), /Poolside/, 'the data-policy page lists Poolside');
 });
 
 test('correction of the absence claims: no note says the page names no plan unless the page has none of the four words, and Voyage AI names free usage', () => {
