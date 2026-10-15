@@ -20,6 +20,8 @@ import { monthlyReport, reportMonths, monthEndDate } from './lib/state.mjs';
 import { externalContributors, countExternalContributors, githubProfileUrl } from './lib/contributors.mjs';
 import { buildOgManifest } from './lib/og.mjs';
 import { explorerRowHtml } from './lib/rows.mjs';
+import { labelTables } from './lib/tables.mjs';
+import { markNewTabLinks } from './lib/links.mjs';
 import { weeklyPacing, weeklyBatch, WEEKLY_CAP, MIN_AGE_DAYS } from './lib/pacing.mjs';
 import { clientConfigProviders, openaiClients, litellmYaml, MODEL_PLACEHOLDER } from './lib/client-config.mjs';
 import { requirementsHtml, limitsHtml, glanceHtml, modelsHtml, dataPolicyHtml } from './lib/provider-sections.mjs';
@@ -525,7 +527,7 @@ test('/best shows the podium of three and the methodology page states the rules'
 
 test('the explorer does not claim a column sort before the user chooses one', () => {
   const explorer = readFileSync(join(ROOT, 'site/index.html'), 'utf8');
-  assert.match(explorer, /<th data-key="name" tabindex="0" aria-sort="none">API<\/th>/);
+  assert.match(explorer, /<th data-key="name" scope="col" aria-sort="none"><button type="button" class="th-sort">API<\/button><\/th>/);
 });
 
 test('the explorer homepage leaves the table immediately after its controls', () => {
@@ -1914,6 +1916,250 @@ test('a11y: the filter chips stay reachable by keyboard and screen reader, with 
   const chips = index.match(/<label class="chip">[\s\S]*?<\/label>/g) || [];
   assert.ok(chips.length >= 6, 'the six filter chips are in the template');
   for (const chip of chips) assert.match(chip, /<input type="checkbox" id="f-[a-z]+">/, 'each chip label contains its checkbox, so the label stays the click target');
+});
+
+test('a11y: small fixes stay in place (finite caret, placeholder colour, no 320px minimum, focus kept after Clear and Escape)', () => {
+  const css = readFileSync(join(ROOT, 'site/styles.css'), 'utf8');
+  const caret = css.split('\n').find((l) => l.startsWith('.caret {'));
+  assert.ok(caret && !/infinite/.test(caret), 'the caret blink stops by itself (WCAG 2.2.2)');
+  assert.match(css, /::placeholder\s*\{[^}]*color:\s*var\(--muted\)/, 'placeholder text uses the muted colour');
+  assert.doesNotMatch(css, /\.limits-table\s*\{[^}]*min-width:\s*320px/, 'the limits table has no 320px minimum (reflow at 320px)');
+  assert.match(css, /minmax\(min\(280px, 100%\), 1fr\)/, 'collection tracks never exceed the container');
+  assert.match(readFileSync(join(ROOT, 'site/explorer.js'), 'utf8'), /getElementById\('q'\)\.focus\(\)/, 'Clear keeps the focus on the search box');
+  assert.match(readFileSync(join(ROOT, 'site/site.js'), 'utf8'), /setNav\(false\); navToggle\.focus\(\)/, 'Escape returns the focus to the menu button');
+});
+
+// ---- /data-policy/ — who trains on your data -----------------------------------------------------
+import { trainState, dataPolicyRows, dataPolicyCounts, dataPolicyMainHtml } from './lib/data-policy-page.mjs';
+
+test('data-policy page: yes or no only with the provider\'s sentence; a value without one reads not confirmed', () => {
+  const q = 'We do not use your prompts to train models.';
+  assert.equal(trainState({ data_policy: { trains_on_prompts: true, quote: q } }), 'yes');
+  assert.equal(trainState({ data_policy: { trains_on_prompts: false, quote: q } }), 'no');
+  assert.equal(trainState({ data_policy: { trains_on_prompts: false } }), 'recorded', 'a boolean alone is not the provider\'s word');
+  assert.equal(trainState({ data_policy: { trains_on_prompts: true, quote: '   ' } }), 'recorded', 'an empty sentence is no sentence');
+  assert.equal(trainState({ data_policy: { trains_on_prompts: null, retention: '30 days', quote: q } }), 'unknown');
+  assert.equal(trainState({ data_policy: null }), 'unknown');
+  assert.equal(trainState({}), 'unknown');
+  assert.equal(trainState({ data_policy: { trains_on_prompts: 'false', quote: q } }), 'unknown', 'a string is not a boolean');
+  const rows = dataPolicyRows([{ name: 'A', slug: 'a', verified: true, data_policy: { trains_on_prompts: false, source: 'https://example.com/p', checked: '2026-10-15' } }]);
+  const html = dataPolicyMainHtml(rows, { repo: 'https://github.com/x/y', generated: '2026-10-15', prefix: '../' });
+  const row = html.slice(html.indexOf('<tbody>'));
+  assert.doesNotMatch(row, /Sentence: does not train|Sentence: may train/, 'a true or false without a sentence must not read as a statement');
+  assert.match(row, /Not confirmed: a value is recorded, no sentence yet/);
+});
+
+test('data-policy page: the counts come from the rows, every verified provider has one row, and nothing is written by hand', () => {
+  const providers = JSON.parse(readFileSync(join(ROOT, 'data/providers.json'), 'utf8')).providers;
+  const rows = dataPolicyRows(providers);
+  const c = dataPolicyCounts(rows);
+  assert.equal(rows.length, providers.filter((p) => p.verified === true).length);
+  assert.equal(c.yes + c.no + c.recorded + c.unknown, c.total);
+  assert.equal(c.notConfirmed, c.recorded + c.unknown);
+  assert.equal(c.withTrainingQuote + c.withRetentionQuote, c.withQuote, 'every sentence is either about training or about retention');
+  assert.equal(c.withTrainingQuote, rows.filter((r) => r.quote && (r.state === 'yes' || r.state === 'no')).length);
+  const html = readFileSync(join(ROOT, 'site/data-policy/index.html'), 'utf8');
+  assert.match(html, new RegExp(`For each of ${c.total} verified providers, this page shows the sentence from the provider's own page about training on prompts where one is recorded\\. ${c.withTrainingQuote} rows have one about training${c.withRetentionQuote ? ` (${c.withRetentionQuote} more carry a sentence about retention only)`.replace(/[()]/g, '\\$&') : ''}; ${c.notConfirmed} are not confirmed \\(${c.recorded} of them have a value in the dataset but no sentence yet\\)`));
+  assert.match(html, new RegExp(`${c.no} have a recorded sentence that says they do not train on prompts, ${c.yes} have one that says they may, and ${c.notConfirmed} are not confirmed`));
+  assert.equal((html.match(/<tr><th scope="row">/g) || []).length, c.total, 'one row per verified provider');
+  assert.match(readFileSync(join(ROOT, 'site/sitemap.xml'), 'utf8'), /<loc>https:\/\/freellmapihub\.com\/data-policy\/<\/loc>/);
+  assert.match(html, /<link rel="canonical" href="https:\/\/freellmapihub\.com\/data-policy\/">/);
+  if (c.withQuote === 0) assert.doesNotMatch(html.slice(html.indexOf('<tbody>')), /Sentence: (may|does not) train/, 'no row reads as a statement while no sentence is recorded');
+});
+
+test('data-policy page: a missing sentence and a missing source are said so; a sentence and a source are escaped and only http(s) links are made', () => {
+  const base = { name: 'Acme <b>', slug: 'acme', verified: true };
+  const rows = dataPolicyRows([
+    { ...base, data_policy: null },
+    { ...base, slug: 'beta', data_policy: { trains_on_prompts: false, retention: null, source: 'javascript:alert(1)', checked: '2026-10-15' } },
+    { ...base, slug: 'gamma', data_policy: { trains_on_prompts: true, retention: null, source: 'https://example.com/terms', checked: '2026-10-15', quote: 'We may use "your" <content>.', note: 'Free plan only.' } },
+  ]);
+  const html = dataPolicyMainHtml(rows, { repo: 'https://github.com/x/y', generated: '2026-10-15', prefix: '../' });
+  assert.match(html, /Not confirmed/);
+  assert.match(html, /No sentence recorded yet\./);
+  assert.match(html, /no source recorded/);
+  assert.doesNotMatch(html, /javascript:/);
+  assert.match(html, /We may use &quot;your&quot; &lt;content&gt;\./);
+  assert.match(html, /&ldquo;We may use &quot;your&quot; &lt;content&gt;\.&rdquo;<\/blockquote><p class="muted dp-foot">Acme &lt;b&gt;, page: <a href="https:\/\/example\.com\/terms"[^>]*>https:\/\/example\.com\/terms<\/a>, read on 2026-10-15\.<\/p>/, 'a sentence carries its provider, page and day');
+  assert.match(html, /Sentence: may train/);
+  assert.match(html, /Free plan only\./);
+  assert.match(html, /href="https:\/\/example\.com\/terms"/);
+  assert.doesNotMatch(html, /Acme <b>/, 'a name from the data is escaped');
+});
+
+// Our own words only: the title, the description, the hero and the main text, without the provider's quoted sentences, which are shown as written.
+const dpOurWords = (html) => {
+  const title = (html.match(/<title>([^<]*)<\/title>/) || [])[1] || '';
+  const desc = (html.match(/<meta name="description" content="([^"]*)"/) || [])[1] || '';
+  const hero = (html.match(/<section class="page-hero[\s\S]*?<\/section>/) || [''])[0];
+  const main = html.slice(html.indexOf('<main id="main"'), html.indexOf('</main>'));
+  // The attribution line under a sentence carries the provider's name and its page address, which can say privacy: it is the provider's, not our words.
+  return [title, desc, hero, main].join(' ').replace(/<blockquote[\s\S]*?<\/blockquote>/g, ' ').replace(/<p class="muted dp-foot">[\s\S]*?<\/p>/g, ' ').replace(/<[^>]*>/g, ' ');
+};
+const DP_BANNED = /\b(safe|safer|secure|private|privacy|privacy-friendly|guarantee[sd]?|trustworthy|best|worst|better|worse|we check|we copy|always|never trains)\b/i;
+
+test('data-policy page: no word that promises safety or ranks providers, no process promise, no advice; a quote may use any word', () => {
+  const html = readFileSync(join(ROOT, 'site/data-policy/index.html'), 'utf8');
+  const visible = dpOurWords(html);
+  assert.doesNotMatch(visible, DP_BANNED);
+  assert.doesNotMatch(visible, /not legal advice|before you rely|always confirm/i, 'no advice and no disclaimer in our voice');
+  assert.equal((html.slice(html.indexOf('<main id="main"'), html.indexOf('</main>')).match(/<h3>/g) || []).length, 5, 'five questions, as text only');
+  assert.doesNotMatch(html, /FAQPage/, 'no FAQPage markup until enough rows carry a sentence');
+  assert.match(visible, /Sentence: does not train.*Sentence: may train.*Not confirmed/is, 'the legend of the three states is on the page');
+  assert.match(visible, /That never means &ldquo;no&rdquo;/i);
+  // A provider's quoted sentence may contain a banned word: it is shown as written and is not scanned.
+  const rows = dataPolicyRows([{ name: 'Acme', slug: 'acme', verified: true, data_policy: { trains_on_prompts: false, source: 'https://example.com/privacy-policy', checked: '2026-10-15', quote: 'We guarantee that your prompts are private.' } }]);
+  const fixture = dataPolicyMainHtml(rows, { repo: 'https://github.com/x/y', generated: '2026-10-15' });
+  assert.match(fixture, /We guarantee that your prompts are private\./);
+  assert.doesNotMatch(dpOurWords(fixture), DP_BANNED, 'the quoted sentence and its attribution line (a page address that says privacy) are exempt');
+});
+
+test('data_policy: the sentence and its note are plain text, bounded, and go with a stated part', () => {
+  const good = { trains_on_prompts: true, retention: null, source: 'https://example.com/terms', checked: '2026-10-09' };
+  const target = (d) => d.providers.find((p) => p.verified === true);
+  assert.equal(validateAfter((d) => { target(d).data_policy = { ...good, quote: 'We may use your content.', note: 'Free plan.' }; }), true, 'a sentence and a note pass');
+  assert.equal(validateAfter((d) => { target(d).data_policy = { ...good, quote: null, note: null }; }), true, 'null means none recorded');
+  for (const bad of [{ quote: '' }, { quote: '   ' }, { quote: 'x'.repeat(401) }, { note: 'x'.repeat(301) }, { quote: 'a\u200bb' }, { quote: 'a\u202eb' }, { quote: 'a\u0007b' }, { note: 'a\ufeffb' }, { quote: 'a\u061cb' }, { quote: 'a\u00adb' }, { quote: 'a\u034fb' }, { quote: 'a\u180eb' }, { quote: 'a\ufe0fb' }, { quote: 'a\u{e0041}b' }, { quote: 'a\u180bb' }, { quote: 'a\u115fb' }, { quote: 'a\u17b4b' }, { quote: 'a\u2800b' }, { quote: 'a\u3164b' }, { quote: 'a\uffa0b' }, { quote: 42 }]) {
+    assert.equal(validateAfter((d) => { target(d).data_policy = { ...good, ...bad }; }), false, `rejected: ${JSON.stringify(bad).slice(0, 40)}`);
+  }
+  assert.equal(validateAfter((d) => { target(d).data_policy = { ...good, trains_on_prompts: null, retention: null, quote: 'Some sentence.' }; }), false, 'a sentence alone records nothing');
+});
+
+// ---- pinned bars never cover the focused element (WCAG 2.4.11, 1.4.10) ----
+test('a11y: the filter bar is pinned only where there is room, and a focused row scrolls in below both bars', () => {
+  const css = readFileSync(join(ROOT, 'site/styles.css'), 'utf8');
+  const js = readFileSync(join(ROOT, 'site/explorer.js'), 'utf8');
+  const base = css.match(/^\.controls \{[^}]*\}/m);
+  assert.ok(base, 'the base .controls rule exists');
+  assert.doesNotMatch(base[0], /position:\s*sticky/, 'the bar is not pinned by default: at 360x700 it is 340px tall and at 320x256 taller than the screen');
+  const media = css.match(/@media \(min-width: 761px\) and \(min-height: 600px\) \{([\s\S]*?)\n\}/);
+  assert.ok(media, 'the pinned mode lives in a media query for wide and tall screens');
+  assert.match(media[1], /\.controls \{ position: sticky; top: var\(--header-h\); \}/, 'pinned only there');
+  assert.match(media[1], /scroll-padding-top: calc\(var\(--header-h\) \+ var\(--controls-h, 120px\) \+ 12px\)/, 'the scroll padding counts both bars');
+  assert.match(js, /new ResizeObserver\(\(\) => document\.documentElement\.style\.setProperty\('--controls-h'/, 'the real height of the wrapping bar is measured');
+  assert.match(css, /^html \{ scroll-behavior: smooth; scroll-padding-top: calc\(var\(--header-h\) \+ 12px\); \}/m, 'with the bar not pinned, only the header needs room');
+});
+
+// ---- links inside running text are underlined (WCAG 1.4.1; axe link-in-text-block) ----
+test('a11y: a plain link inside a paragraph or a list item is underlined, so it does not rest on colour alone', () => {
+  const css = readFileSync(join(ROOT, 'site/styles.css'), 'utf8');
+  assert.match(css, /main p a:not\(\[class\]\), main li a:not\(\[class\]\) \{ text-decoration: underline; text-underline-offset: 2px; \}/);
+  // The case that axe found on /best/: a classless link in the lead paragraph.
+  const best = readFileSync(join(ROOT, 'site/best/index.html'), 'utf8');
+  assert.match(best, /<p[^>]*>[^<]*<a href="methodology\/">how the score works<\/a>/, 'the link axe measured is a classless link inside a paragraph, so the rule reaches it');
+});
+
+// ---- reflow at 320 CSS px (WCAG 1.4.10): a wide data table scrolls inside its own region, and the header fits ----
+test('a11y: wide data tables sit in a keyboard-reachable scroll region and the header fits at 320px', () => {
+  const css = readFileSync(join(ROOT, 'site/styles.css'), 'utf8');
+  assert.match(css, /^\.table-scroll \{ overflow-x: auto; max-width: 100%; position: relative; \}/m, 'the region is positioned, so the screen-reader-only text inside the table cannot widen the page');
+  assert.match(css, /@media \(max-width: 340px\) \{\s*\.header-actions \.star-count \{ display: none; \}/, 'at 320px the star count is dropped so the header buttons stay in the viewport');
+  const region = /<div class="table-scroll" role="region" aria-label="[^"]+" tabindex="0"><table/;
+  for (const f of ['site/data-policy/index.html', 'site/collections/no-training.html', 'site/collections/no-credit-card.html']) {
+    const html = readFileSync(join(ROOT, f), 'utf8');
+    assert.match(html, region, `${f}: the table is in a labelled, focusable scroll region`);
+    assert.equal((html.match(/<table/g) || []).length, (html.match(/class="table-scroll"/g) || []).length, `${f}: every table of the page is in one`);
+  }
+  assert.match(readFileSync(join(ROOT, 'site/programs/startups.html'), 'utf8'), region, 'the programs table too');
+});
+
+// ---- the data-policy table fits a laptop screen (measured: 1114px at 1100px before, 1052px after) ----
+test('mobile: the two long text cells stack their label above the text at 720px', () => {
+  const css = readFileSync(join(ROOT, 'site/styles.css'), 'utf8').replace(/\s+/g, ' ');
+  assert.match(css, /#table td\.notes, #table td:nth-child\(3\) \{ display: block; \}/, 'the notes and the catch cells are blocks, not a 40% label beside a narrow column');
+  assert.match(css, /#table td\.notes::before, #table td:nth-child\(3\)::before \{ display: block;/, 'the label sits above the text');
+});
+
+test('data-policy page: five columns, the help link inside the source cell, and the header labels may wrap', () => {
+  const html = readFileSync(join(ROOT, 'site/data-policy/index.html'), 'utf8');
+  const head = html.slice(html.indexOf('<thead>'), html.indexOf('</thead>'));
+  assert.equal((head.match(/<th scope="col">/g) || []).length, 5, 'five columns: provider, state, retention, own words, source and help');
+  assert.doesNotMatch(head, />Help</, 'no separate Help column: it was the one cut off at 1100px');
+  const row = html.slice(html.indexOf('<tbody>')).match(/<tr>[\s\S]*?<\/tr>/)[0];
+  assert.match(row, /<td>[\s\S]*?<p class="muted dp-foot"><a href="[^"]+\/issues\/new[^"]*"[^>]*>add or correct(<span class="sr-only">[^<]*<\/span>)*<\/a><\/p><\/td><\/tr>/, 'the add-or-correct link sits under the source');
+  assert.match(readFileSync(join(ROOT, 'site/styles.css'), 'utf8'), /^\.dp-table thead th \{ white-space: normal; \}/m, 'the long header labels wrap instead of widening the table');
+});
+
+// ---- every table names itself and its headers (WCAG 1.3.1, 2.4.6) ----
+test('tables: labelTables adds a caption from the nearest heading and a scope to every header, and leaves what is already there', () => {
+  const html = '<h1>Page</h1><h2>Free <em>limits</em></h2><h3>Detail</h3><table><thead><tr><th>A</th><th class="n">B</th></tr></thead><tbody><tr><th>row</th><td>1</td></tr></tbody></table>';
+  const out = labelTables(html);
+  assert.match(out, /<table><caption class="sr-only">Free limits<\/caption>/, 'the nearest h1 or h2, tags removed; an h3 is not used');
+  assert.match(out, /<th scope="col">A<\/th><th scope="col" class="n">B<\/th>/, 'a header row gets scope col');
+  assert.match(out, /<th scope="row">row<\/th>/, 'a header beside data cells gets scope row');
+  const kept = labelTables('<h2>X</h2><table><caption>Mine</caption><tr><th scope="rowgroup">G</th><td>1</td></tr></table>');
+  assert.equal((kept.match(/<caption/g) || []).length, 1, 'an existing caption is kept and none is added');
+  assert.match(kept, /<caption>Mine<\/caption>/);
+  assert.match(kept, /<th scope="rowgroup">/, 'an existing scope is kept');
+  assert.match(labelTables('<table><tr><th>A</th></tr></table>'), /<caption class="sr-only">Table<\/caption>/, 'no heading above: a plain name');
+  assert.equal(labelTables('<p>no table</p>'), '<p>no table</p>');
+});
+
+test('tables: every table of every generated page has a caption and every header cell a scope', () => {
+  const walk = (dir) => readdirSync(dir).flatMap((n) => { const p = join(dir, n); return statSync(p).isDirectory() ? walk(p) : p.endsWith('.html') ? [p] : []; });
+  const bad = [];
+  let tables = 0;
+  for (const f of walk(join(ROOT, 'site'))) {
+    for (const tbl of readFileSync(f, 'utf8').match(/<table\b[^>]*>[\s\S]*?<\/table>/g) || []) {
+      tables += 1;
+      if (!/<caption\b/.test(tbl)) bad.push(`${relative(ROOT, f)}: a table without caption`);
+      for (const th of tbl.match(/<th\b[^>]*>/g) || []) if (!/\bscope=/.test(th)) { bad.push(`${relative(ROOT, f)}: ${th} without scope`); break; }
+    }
+  }
+  assert.ok(tables > 50, `the check really saw the tables (${tables})`);
+  assert.deepEqual(bad, []);
+});
+
+// ---- a link that opens a new tab says so, and repeated link texts say what they are for (WCAG 2.4.4, 3.2.5) ----
+test('links: markNewTabLinks adds a screen-reader note to every link that opens a new tab and touches nothing else', () => {
+  const out = markNewTabLinks('<p><a href="https://a.example" target="_blank" rel="noopener">docs</a> <a href="/x">same tab</a> <a target="_blank" href="y">y <b>bold</b></a></p><script>var s = \'<a target="_blank">in a script</a>\';</script><style>a[target="_blank"]{}</style>');
+  assert.match(out, /docs<span class="sr-only"> \(opens in a new tab\)<\/span><\/a>/);
+  assert.match(out, /<a href="\/x">same tab<\/a>/, 'a same-tab link is untouched');
+  assert.match(out, /y <b>bold<\/b><span class="sr-only"> \(opens in a new tab\)<\/span><\/a>/, 'inner markup is kept');
+  assert.match(out, /<script>var s = '<a target="_blank">in a script<\/a>';<\/script>/, 'a script is untouched');
+  assert.equal(markNewTabLinks(out), out, 'applying it twice changes nothing');
+});
+
+test('links: on every generated page, each link that opens a new tab carries the note, and the coverage tasks name their provider', () => {
+  const walk = (dir) => readdirSync(dir).flatMap((n) => { const p = join(dir, n); return statSync(p).isDirectory() ? walk(p) : p.endsWith('.html') ? [p] : []; });
+  let seen = 0;
+  const bad = [];
+  for (const f of walk(join(ROOT, 'site'))) {
+    const html = readFileSync(f, 'utf8').replace(/<script\b[\s\S]*?<\/script>/g, '');
+    for (const m of html.matchAll(/<a\b[^>]*target="_blank"[^>]*>[\s\S]*?<\/a>/g)) { seen += 1; if (!m[0].includes('(opens in a new tab)')) bad.push(`${relative(ROOT, f)}: ${m[0].slice(0, 80)}`); }
+  }
+  assert.ok(seen > 500, `the check really saw the links (${seen})`);
+  assert.deepEqual(bad.slice(0, 5), []);
+  const cov = readFileSync(join(ROOT, 'site/coverage/index.html'), 'utf8');
+  const tasks = cov.match(/<li class="cov-task">[\s\S]*?<\/li>/g) || [];
+  assert.ok(tasks.length > 50, 'the coverage page lists its open tasks');
+  for (const t of tasks.slice(0, 30)) {
+    assert.match(t, /official docs<span class="sr-only"> for [^<]+<\/span>/, 'the docs link says whose docs');
+    assert.match(t, /propose the value<span class="sr-only"> for [^<]+<\/span>/, 'the proposal link says for whom');
+  }
+});
+
+// ---- focus ring contrast (WCAG 1.4.11, 2.4.7): the global ring is the accent colour, and it must stand out against every surface ----
+const luminance = (hex) => {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+const contrast = (a, b) => { const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x); return (hi + 0.05) / (lo + 0.05); };
+
+test('a11y: the global focus ring is at least 2px, uses the accent and reaches 3:1 against every surface in both themes', () => {
+  const css = readFileSync(join(ROOT, 'site/styles.css'), 'utf8');
+  assert.match(css, /^:focus-visible \{ outline: 2px solid var\(--accent\); outline-offset: 2px;/m, 'the global ring: 2px, accent, offset');
+  const block = (selector) => css.slice(css.indexOf(selector + ' {'), css.indexOf('\n}', css.indexOf(selector + ' {')));
+  const token = (b, name) => { const m = b.match(new RegExp('--' + name + ':\\s*(#[0-9a-fA-F]{6})')); assert.ok(m, `token --${name} is missing`); return m[1]; };
+  for (const [theme, b] of [['dark', block(':root')], ['light', block('[data-theme="light"]')]]) {
+    const ring = token(b, 'accent');
+    for (const surface of ['bg', 'bg-elev', 'panel', 'panel-2']) {
+      assert.ok(contrast(ring, token(b, surface)) >= 3, `${theme}: the focus ring on --${surface} is below 3:1 (${contrast(ring, token(b, surface)).toFixed(2)})`);
+    }
+  }
+  // The ring must not be removed from a control that takes the keyboard: the only outline:none rules are the ones that draw their own focus.
+  const removed = [...css.matchAll(/([^{}]+)\{[^}]*outline:\s*none[^}]*\}/g)].map((m) => m[1].trim());
+  assert.deepEqual(removed.filter((s) => /th-sort|chip|\.sel\b|button|a:focus/.test(s)), [], 'no outline:none on the sort buttons, chips, selects, buttons or links');
 });
 
 // ---- Dated banner mechanism (site/site.js) ---------------------------------

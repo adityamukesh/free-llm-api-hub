@@ -21,6 +21,10 @@ import { githubProfileUrl } from './lib/contributors.mjs';
 import { resolveBestEntries, topEntries, partnerErrors, PODIUM_SIZE } from './lib/best.mjs';
 import { coverage, coverageMainHtml } from './lib/coverage.mjs';
 import { freeGpuMainHtml } from './lib/free-gpu.mjs';
+import { labelTables } from './lib/tables.mjs';
+import { markNewTabLinks } from './lib/links.mjs';
+import { codingToolsMainHtml } from './lib/free-coding-tools.mjs';
+import { dataPolicyRows, dataPolicyMainHtml } from './lib/data-policy-page.mjs';
 import { SCORE_WEIGHTS, EDITORIAL_WEIGHT, EDITORIAL_DEFAULT, MATH_INPUTS, MIN_CONFIRMED, TOP_SIZE, EDITORIAL_NOTE_THRESHOLD, STABILITY_MIN_DAYS, STABILITY_MIN_SAMPLES, rankProviders, editorialRating } from './lib/score.mjs';
 import { openaiClients, litellmYaml } from './lib/client-config.mjs';
 import * as compareLib from './lib/compare.mjs';
@@ -382,7 +386,8 @@ function collectionTableHtml(rows, opts = {}) {
       return `<tr><td class="name">${name}${flagsHtml(p)}</td><td>${col2}</td><td>${htmlEsc(p.free_tier)}</td><td class="notes">${htmlEsc(p.notes)}</td><td>${v}</td></tr>`;
     })
     .join('\n');
-  return `<table><thead><tr><th>Provider</th><th>${col2Head}</th><th>What's free</th><th>The catch</th><th>Verified</th></tr></thead><tbody>\n${rowsHtml}\n</tbody></table>`;
+  // The table scrolls inside its own region when it is wider than the column (it is 611px at a 360px screen): the page never scrolls sideways.
+  return `<div class="table-scroll" role="region" aria-label="Table of providers" tabindex="0"><table><thead><tr><th>Provider</th><th>${col2Head}</th><th>What's free</th><th>The catch</th><th>Verified</th></tr></thead><tbody>\n${rowsHtml}\n</tbody></table></div>`;
 }
 
 // Shared chrome for generated pages (collection pages live one level below site root → '../').
@@ -432,7 +437,7 @@ const siteFooter = (p) => `<footer class="site-footer"><div class="wrap footer-t
 <div class="footer-brand"><a class="foot-brand-link" href="${p}" aria-label="Free LLM API Hub — home"><svg class="logo-mark"><use href="#logo"/></svg><span class="brand-name">Free LLM API <span class="grad">Hub</span></span></a><p>The <strong>continuously-verified</strong>, <strong>machine-readable</strong> dataset of <strong>free LLM &amp; AI-model APIs</strong> and <strong>trial credits</strong> — every entry <strong>dated</strong>, <strong>sourced</strong>, and <strong>free of dead links</strong>.</p><img class="trust-badge" src="https://img.shields.io/endpoint?url=https://freellmapihub.com/badge-verified.json" alt="Verified providers" height="20" loading="lazy"><a class="star-btn" href="${REPO}" target="_blank" rel="noopener"><span class="sb-label">${GH_ICON} Star on GitHub</span><span class="sb-count" data-stars>★</span></a></div>
 <div class="footer-col"><h2 class="footer-h">Explore</h2><a href="${p}#explorer">Interactive explorer</a><a href="${p}models/">Free model index</a><a href="${p}guides-and-collections/">Guides &amp; collections</a><a href="${p}programs/startups">Startup credits</a><a href="${p}programs/research">Student &amp; research credits</a></div>
 <div class="footer-col"><h2 class="footer-h">Data</h2><a href="${p}providers.json">providers.json</a><a href="${p}api/">JSON API</a><a href="${p}llms.txt">llms.txt</a></div>
-<div class="footer-col"><h2 class="footer-h">Project</h2><a href="${p}updates">Updates</a><a href="${p}changes/">What changed</a><a href="${p}state/">Monthly state report</a><a href="${p}coverage/">Data coverage</a><a href="${p}free-gpu/">Free GPU compute</a><a href="${REPO}/blob/main/docs/methodology.md">Methodology</a><a href="${REPO}/blob/main/CONTRIBUTING.md">Contributing</a><a href="${REPO}">GitHub ★</a></div>
+<div class="footer-col"><h2 class="footer-h">Project</h2><a href="${p}updates">Updates</a><a href="${p}changes/">What changed</a><a href="${p}state/">Monthly state report</a><a href="${p}coverage/">Data coverage</a><a href="${p}data-policy/">Who trains on your data</a><a href="${p}free-gpu/">Free GPU compute</a><a href="${p}coding-tools/">Free AI coding tools</a><a href="${REPO}/blob/main/docs/methodology.md">Methodology</a><a href="${REPO}/blob/main/CONTRIBUTING.md">Contributing</a><a href="${REPO}">GitHub ★</a></div>
 </div><div class="wrap footer-bottom"><p>Independent, community-maintained — not affiliated with any provider listed. Terms change without notice; always confirm against each provider's own docs. MIT licensed.</p><p class="foot-legal"><a href="${p}legal/privacy">Privacy</a> · <a href="${p}legal/terms">Terms</a></p><p class="foot-email"><a href="mailto:admin@freellmapihub.com">admin@freellmapihub.com</a></p></div></footer>`;
 
 // Full page wrapper for generated (collection) pages. `p` is the path prefix to the site root.
@@ -468,7 +473,7 @@ try {
 } catch { /* no stats file: the placeholder stays */ }
 const withStars = (html) => (STARS ? html.replace(/(data-stars>)[^<]*(<)/g, `$1${STARS}$2`) : html);
 
-function htmlPage(args) { return withStars(htmlPageRaw(args)); }
+function htmlPage(args) { return markNewTabLinks(labelTables(withStars(htmlPageRaw(args)))); }
 function htmlPageRaw({ title, desc, canonical, main, jsonld, prefix = '../', noindex = false, ogImage = `${SITE}/og.png`, feeds = [], scripts = [] }) {
   // jsonld carries provider names straight from the dataset; writing "<" as
   // the JSON unicode escape (backslash-u-003c) keeps a "</script>" in the
@@ -1224,7 +1229,7 @@ const programPage = (slug, h1, lede, tableHead, rowsHtml, extra = '') =>
       `<section class="page-hero"><div class="wrap"><nav class="crumbs"><a href="../">Home</a> / ${htmlEsc(h1)}</nav>` +
       `<h1>${htmlEsc(h1)}</h1><p class="lede">${lede}</p></div></section>` +
       `<main id="main"><div class="wrap prose"><p class="count"><strong>${LEGEND}</strong></p>` +
-      `<table><thead>${tableHead}</thead><tbody>\n${rowsHtml}\n</tbody></table>` +
+      `<div class="table-scroll" role="region" aria-label="Table of programs" tabindex="0"><table><thead>${tableHead}</thead><tbody>\n${rowsHtml}\n</tbody></table></div>` +
       `<p style="margin-top:24px">Looking for a key to use right now with no application? See the <a href="../#explorer">verified self-serve list</a>.</p>${extra}</div></main>`,
   });
 
@@ -1402,6 +1407,34 @@ writeApi('free-gpu.json', {
   notes: freeGpu.notes || [],
 });
 writeFileSync(join(ROOT, 'site/api/v1/free-gpu.schema.json'), readFileSync(join(ROOT, 'data/free-gpu.schema.json')));
+// /api/v1/coding-tools.json: the Free AI coding tools section, apart from the provider ranking. It is the data file
+// as it is (data/coding-tools.json), with its contract v1 and a JSON Schema at a stable URL; it carries no count of
+// providers and nothing here is read by any other file of the API.
+const codingTools = JSON.parse(readFileSync(join(ROOT, 'data/coding-tools.json'), 'utf8'));
+const CODING_TOOLS_SCHEMA_URL = SITE + '/api/v1/coding-tools.schema.json';
+writeApi('coding-tools.json', {
+  ...apiBase,
+  description: 'Coding tools that say they have a free plan, apart from the provider ranking: each value with the sentence it rests on and the day it was read; a value the tool did not state reads not_stated, which is never no. Page: ' + SITE + '/coding-tools/',
+  schema: CODING_TOOLS_SCHEMA_URL,
+  page: SITE + '/coding-tools/',
+  count: codingTools.entries.length,
+  entries: codingTools.entries,
+  notes: codingTools.notes || [],
+});
+writeFileSync(join(ROOT, 'site/api/v1/coding-tools.schema.json'), readFileSync(join(ROOT, 'data/coding-tools-api.schema.json')));
+// /api/v1/coding-tools-own-key.json: the coding tools that are free themselves while inference is paid with your own key
+// or a free API. A file of its own so the contract of coding-tools.json never changes and the two lists never mix in a client.
+const codingToolsOwnKey = JSON.parse(readFileSync(join(ROOT, 'data/coding-tools-own-key.json'), 'utf8'));
+writeApi('coding-tools-own-key.json', {
+  ...apiBase,
+  description: 'Coding tools that are free themselves while inference is paid with your own key or a free API, apart from the provider ranking and from the tools with their own free plan: each value with the sentence it rests on and the day it was read; a value the tool did not state reads not_stated, which is never no. Page: ' + SITE + '/coding-tools/#own-key',
+  schema: SITE + '/api/v1/coding-tools-own-key.schema.json',
+  page: SITE + '/coding-tools/#own-key',
+  count: codingToolsOwnKey.entries.length,
+  entries: codingToolsOwnKey.entries,
+  notes: codingToolsOwnKey.notes || [],
+});
+writeFileSync(join(ROOT, 'site/api/v1/coding-tools-own-key.schema.json'), readFileSync(join(ROOT, 'data/coding-tools-own-key-api.schema.json')));
 const API_SLICES = {
   ongoing: (p) => p.category === 'ongoing',
   trial: (p) => p.category === 'trial',
@@ -1438,6 +1471,10 @@ const apiEndpoints = {
   'score-schema': 'v1/score.schema.json',
   'free-gpu': 'v1/free-gpu.json',
   'free-gpu-schema': 'v1/free-gpu.schema.json',
+  'coding-tools': 'v1/coding-tools.json',
+  'coding-tools-schema': 'v1/coding-tools.schema.json',
+  'coding-tools-own-key': 'v1/coding-tools-own-key.json',
+  'coding-tools-own-key-schema': 'v1/coding-tools-own-key.schema.json',
   schema: 'v1/schema.json',
   'openai-clients': 'v1/openai-clients.json',
   litellm: 'v1/litellm.yaml',
@@ -1488,6 +1525,10 @@ const apiDocMain =
   apiRow('JSON Schema of score.json (contract v1)', 'score.schema.json', null) +
   apiRow('Free GPU compute, apart from the ranking (not a count of providers)', 'free-gpu.json', freeGpu.entries.length) +
   apiRow('JSON Schema of free-gpu.json (contract v1)', 'free-gpu.schema.json', null) +
+  apiRow('Free AI coding tools, apart from the ranking (not a count of providers)', 'coding-tools.json', codingTools.entries.length) +
+  apiRow('JSON Schema of coding-tools.json (contract v1)', 'coding-tools.schema.json', null) +
+  apiRow('Free AI coding tools you connect your own key to, apart from the ranking (not a count of providers)', 'coding-tools-own-key.json', codingToolsOwnKey.entries.length) +
+  apiRow('JSON Schema of coding-tools-own-key.json (contract v1)', 'coding-tools-own-key.schema.json', null) +
   apiRow('Field-level provider changes by ISO week (last 12 weeks)', 'changes.json', null) +
   apiRow('Endpoint manifest', 'index.json', null) +
   apiRow('JSON Schema of the dataset (copy of data/schema.json)', 'schema.json', null) +
@@ -1668,6 +1709,40 @@ writeFileSync(
   })
 );
 
+// ---------- /coding-tools/ — free AI coding tools, apart from the ranking ----------
+// Reads data/coding-tools.json only; nothing here enters a provider count, score or collection.
+mkdirSync(join(ROOT, 'site/coding-tools'), { recursive: true });
+writeFileSync(
+  join(ROOT, 'site/coding-tools/index.html'),
+  htmlPage({
+    title: 'Free AI coding tools · Free LLM API Hub',
+    desc: 'Coding tools that say they have a free plan, each value with the tool\'s own sentence and the day it was read. A separate list from the ranking of free LLM APIs; not stated is never no.',
+    canonical: SITE + '/coding-tools/',
+    main:
+      '<section class="page-hero model-hero"><div class="wrap"><nav class="crumbs"><a href="../">Home</a> / Free AI coding tools</nav>' +
+      '<h1>Free AI coding tools</h1><p class="lede">Coding tools that say they have a free plan. Apart from the ranking, and every value written only where the tool\'s own page says it.</p></div></section>' +
+      codingToolsMainHtml(codingTools, { prefix: '../', repo: REPO, ownKey: codingToolsOwnKey }),
+    prefix: '../',
+  })
+);
+
+// ---------- /data-policy/ — who trains on your data, with the provider's own words ----------
+// Reads data_policy only. A row without a recorded sentence says so; "not confirmed" is never "no".
+mkdirSync(join(ROOT, 'site/data-policy'), { recursive: true });
+writeFileSync(
+  join(ROOT, 'site/data-policy/index.html'),
+  htmlPage({
+    title: 'Who trains on your data · Free LLM API Hub',
+    desc: 'The sentence from each free LLM API provider\'s own page about training on prompts, where one is recorded, with the page and the day it was read. Not confirmed is never no.',
+    canonical: SITE + '/data-policy/',
+    main:
+      '<section class="page-hero model-hero"><div class="wrap"><nav class="crumbs"><a href="../">Home</a> / Who trains on your data</nav>' +
+      '<h1>Who trains on your data</h1><p class="lede">The provider\'s own sentence about training on prompts, where one is recorded, with its page and the day it was read.</p></div></section>' +
+      dataPolicyMainHtml(dataPolicyRows(providers), { repo: REPO, generated: data.generated, prefix: '../' }),
+    prefix: '../',
+  })
+);
+
 // ---------- /free-gpu/ — the Free GPU compute section, apart from the ranking ----------
 // Reads data/gpu-compute.json only; nothing here enters a provider count, score or collection.
 mkdirSync(join(ROOT, 'site/free-gpu'), { recursive: true });
@@ -1775,7 +1850,9 @@ const sitemapEntries = [
   [`${SITE}/best/`, data.generated],
   [`${SITE}/best/methodology/`, data.generated],
   [`${SITE}/coverage/`, data.generated],
+  [`${SITE}/data-policy/`, data.generated],
   [`${SITE}/free-gpu/`, freeGpu.generated],
+  [`${SITE}/coding-tools/`, codingTools.generated],
   [`${SITE}/api/`, data.generated],
   [`${SITE}/changes/`, data.generated],
   [`${SITE}/state/`, data.generated],

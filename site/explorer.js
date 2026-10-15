@@ -51,6 +51,8 @@ function render() {
   const emptyEl = document.getElementById('empty');
   emptyEl.style.display = rows.length ? 'none' : 'block';
   emptyEl.textContent = rows.length ? '' : 'No providers match these filters.';
+  // A permanent live region says how many providers are shown after each filter or search (the empty message is visible text only).
+  document.getElementById('count').textContent = rows.length ? `${rows.length} of ${DATA.length} providers shown` : 'No providers match these filters.';
   const activeCount = (query.trim() ? 1 : 0) + (category !== 'all' ? 1 : 0) + 
     (modality !== 'all' ? 1 : 0) +
     (sortKey !== 'recommended' ? 1 : 0) +
@@ -116,6 +118,8 @@ document.getElementById('tbody').addEventListener('focusin', (e) => {
 // The server-rendered rows are navigable before (or without) a client repaint.
 syncRoving();
 
+// The status of the oldest verification in words, so it never rests on colour alone.
+const STATUS_WORD = { fresh: 'fresh', due: 'due for re-check', stale: 'stale' };
 function renderStats() {
   const total = DATA.length;
   const ongoing = DATA.filter(p => p.category === 'ongoing').length;
@@ -132,7 +136,7 @@ function renderStats() {
     ['ic-shield', `${oldest}d`, `oldest verification · ${slaDays}-day SLA`, status],
   ];
   document.getElementById('stats').innerHTML = tiles.map(([ic, n, l, c]) =>
-    `<div class="stat ${c}"><svg class="si" aria-hidden="true"><use href="#${ic}"/></svg><div class="num">${n}</div><div class="lbl">${l}</div></div>`).join('');
+    `<div class="stat ${c}"><svg class="si" aria-hidden="true"><use href="#${ic}"/></svg><div class="num">${n}</div><div class="lbl">${l}${c ? `<span class="sr-only"> (${STATUS_WORD[c] || c})</span>` : ''}</div></div>`).join('');
 }
 
 // On small screens the column headers are hidden, so a select offers the same sorts.
@@ -169,9 +173,9 @@ document.querySelectorAll('#cat button').forEach(btn => btn.addEventListener('cl
   btn.classList.add('active'); btn.setAttribute('aria-pressed', 'true');
   category = btn.dataset.cat; render();
 }));
+// Each sortable header holds a real button: Enter and Space click it natively and the click reaches the header cell.
 document.querySelectorAll('thead th[data-key]').forEach(th => {
   th.addEventListener('click', () => applySort(th));
-  th.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); applySort(th); } });
 });
 ['f-nocard', 'f-nophone', 'f-commercial', 'f-notrain', 'f-openai', 'f-verified'].forEach(id =>
   document.getElementById(id).addEventListener('input', e => {
@@ -261,11 +265,19 @@ function resetControls() {
   modality = 'all'; document.getElementById('modality').value = 'all';
   URL_FLAGS.forEach(([, id]) => { const el = document.getElementById(id); el.checked = false; const chip = el.closest('.chip'); if (chip) chip.classList.remove('on'); });
 }
+// The pinned filter bar's real height (it wraps) keeps a focused row from sitting under it: the style sheet reads --controls-h.
+(() => {
+  const bar = document.querySelector('.controls');
+  if (!bar || typeof ResizeObserver === 'undefined') return;
+  new ResizeObserver(() => document.documentElement.style.setProperty('--controls-h', Math.round(bar.getBoundingClientRect().height) + 'px')).observe(bar);
+})();
 document.getElementById('clearFilters').addEventListener('click', () => {
   resetControls();
   sortKey = 'recommended'; sortDir = 1;
   document.querySelectorAll('thead th').forEach(h => { h.classList.remove('sorted', 'asc'); h.setAttribute('aria-sort', 'none'); });
   render();
+  // The Clear button hides itself once nothing is filtered: keep the keyboard focus on the page.
+  document.getElementById('q').focus();
 });
 // The dataset is inlined at build time (see #providers-data) so the table is server-rendered
 // and the page needs no network round-trip. Fall back to fetch only if the inline data is absent.
