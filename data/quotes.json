@@ -476,6 +476,17 @@
    "page_sha256": "9399f9854cd2d68dce07f6bcfbdc9f8a785c7d06a3e8930b6cf81789fd32f5ff"
   },
   {
+   "id": "poolside.sentence",
+   "slug": "poolside",
+   "kind": "sentence",
+   "text": "We may use your Content to provide, maintain, improve, and develop the Products and other Poolside offerings, including training our models, unless you opt-out.",
+   "source_url": "https://poolside.ai/legal/eula",
+   "read_on": "2026-10-16",
+   "lang": "en",
+   "method": "html-text-v1: page requested in English, tags removed, character references decoded, white space collapsed",
+   "page_sha256": "e61bfb4ed61a5d4ffb954d7f42d9b8a30322dae299ad4fd317dd9ed0b1fe1aea"
+  },
+  {
    "id": "upstage.sentence",
    "slug": "upstage",
    "kind": "sentence",
