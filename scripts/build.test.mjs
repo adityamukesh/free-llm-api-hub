@@ -1531,6 +1531,21 @@ const validateAfter = (mutate) => {
   return exitOk(['scripts/validate.mjs', fixture]);
 };
 
+// A `generated` after today in UTC is what a contributor in a time zone ahead of UTC writes at the end of their day (2026-10-16 when it is still
+// 2026-10-15 in UTC). It must fail, with the way to write the day.
+test('validate: the dates of the dataset are UTC days and none is in the future', () => {
+  const data = JSON.parse(readFileSync(DATA, 'utf8'));
+  const withToday = (today, file = DATA) => { try { execFileSync(process.execPath, ['scripts/validate.mjs', file], { cwd: ROOT, stdio: 'pipe', env: { ...process.env, VALIDATE_TODAY: today } }); return ''; } catch (e) { return `${e.stdout}${e.stderr}`; } };
+  assert.equal(withToday(data.generated), '', 'generated is today: valid');
+  assert.equal(withToday('2999-01-01'), '', 'generated in the past: valid');
+  const day = new Date(Date.parse(`${data.generated}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
+  assert.match(withToday(day), new RegExp(`generated \\(${data.generated}\\) is after today in UTC \\(${day}\\); write the dates of the dataset in UTC`), 'generated the day after "today" fails and says how to write it');
+  assert.equal(validateAfter((d) => { d.generated = '2999-01-01'; }), false, 'with the real clock, a generated far in the future fails');
+  const later = tmpFile('providers.json'); writeFileSync(later, JSON.stringify({ ...data, generated: '2026-10-16' }));
+  assert.match(withToday('2026-10-15', later), /after today in UTC \(2026-10-15\)/, 'the contributor in Asia: 2026-10-16 when it is 2026-10-15 in UTC');
+  assert.match(readFileSync(join(ROOT, 'CONTRIBUTING.md'), 'utf8'), /Dates are UTC days/, 'CONTRIBUTING says it');
+});
+
 test('model tier thresholds: edges, tier 0 versus no source, and the minimum votes', () => {
   assert.deepEqual(MODEL_TIER_THRESHOLDS, [[4, 1450], [3, 1400], [2, 1330], [1, 1250]]);
   assert.equal(tierForRating(1450), 4);
@@ -2125,7 +2140,7 @@ test('data_policy lot 4: the 13 providers that say they do not train were read f
   for (const p of data.providers.filter((q) => q.data_policy && q.data_policy.trains_on_prompts !== false)) {
     // rows that say it may train were read for the plan later (lots 2, 3, 5 and the correction of the absence claims): true where the
     // clause names the free users or free usage (AssemblyAI, Voyage AI), false where it does not
-    const READ = { assemblyai: true, 'voyage-ai': true, elevenlabs: false, cartesia: false, 'retell-ai': false, deepgram: false, 'arli-ai': false, poolside: false };
+    const READ = { assemblyai: true, 'voyage-ai': true, elevenlabs: false, cartesia: false, 'retell-ai': false, deepgram: false, 'arli-ai': false, 'sarvam-ai': false, poolside: false };
     if (p.slug in READ) assert.equal(p.data_policy.plan_named, READ[p.slug], `${p.slug}: plan_named as read`);
     else assert.equal(p.data_policy.plan_named, undefined, `${p.slug}: not read for the plan yet, so no value is written`);
   }
@@ -2160,9 +2175,9 @@ test('data_policy lot 6: at least 26 of 68, AI21 says it does not train, with th
   assert.ok(md.split('\n').some((l) => l.startsWith('| **[AI21')), 'AI21 is in the no-training collection');
 });
 
-test('data_policy lot 7: 28 of 68, Poolside may train on your Content by its Terms of Use unless you opt out (#341)', () => {
+test('data_policy lot 7: 29 of 68, Poolside may train on your Content by its Terms of Use unless you opt out (#341)', () => {
   const data = JSON.parse(readFileSync(DATA, 'utf8'));
-  assert.equal(data.providers.filter((p) => p.data_policy).length, 28, 'the count of covered providers');
+  assert.equal(data.providers.filter((p) => p.data_policy).length, 29, 'the count of covered providers');
   const dp = data.providers.find((p) => p.slug === 'poolside').data_policy;
   assert.equal(dp.trains_on_prompts, true, 'may train, even though you can opt out');
   assert.equal(dp.retention, null, 'the terms state no retention period for Content');
